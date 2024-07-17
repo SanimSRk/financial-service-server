@@ -134,6 +134,17 @@ async function run() {
       res.send({ user: result });
     });
 
+    app.patch('/send-free', async (req, res) => {
+      const qurey = { email: req.query.email };
+
+      const updateDc = {
+        $inc: { balance: -5 },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
     app.post('/cash-out', async (req, res) => {
       const cashout = req.body;
       const qurey = { email: cashout?.email };
@@ -169,6 +180,21 @@ async function run() {
       res.send({ user: user });
     });
 
+    app.post('/amount-request', async (req, res) => {
+      const userInfo = req.body;
+      const result = await transactionCollections.insertOne(userInfo);
+      res.send(result);
+    });
+
+    app.get('/transactions-history', async (req, res) => {
+      const qurey = { email: req.query.email };
+      const result = await transactionCollections
+        .find(qurey)
+        .sort({ date: 1 })
+        .limit(10)
+        .toArray();
+      res.send(result);
+    });
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!'
     );
