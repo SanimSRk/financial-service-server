@@ -1,5 +1,5 @@
 const express = require('express');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -82,7 +82,7 @@ async function run() {
         const result = await userCollections.insertOne(userInfo);
         res.send(result);
       } else {
-        return res.send('User alredy exist');
+        return res.send({ message: 'your email alredy account ' });
       }
     });
 
@@ -91,9 +91,13 @@ async function run() {
       const password = req.query.password;
 
       const currentUser = await userCollections.findOne({ email: email });
-      const hxpassword = bcrypt.compareSync(password, currentUser.password);
+      const hxpassword = bcrypt.compareSync(password, currentUser?.password);
 
-      if (!hxpassword) {
+      if (!currentUser) {
+        return res.send({
+          message: 'Your email and password invalid. Please try again',
+        });
+      } else if (!hxpassword) {
         return res.send({
           message: 'Your email and password invalid. Please try again',
         });
@@ -111,7 +115,13 @@ async function run() {
     app.post('/send-money', async (req, res) => {
       const userInfo = req.body;
       const sendMoney = userInfo?.money;
-
+      const sendMoneyInfos = {
+        email: userInfo.email,
+        numbers: userInfo.numbers,
+        money: userInfo.money,
+        date: userInfo.date,
+        paymentStatus: 'send-money',
+      };
       const qurey = { email: userInfo?.email };
       const currentUser = await userCollections.findOne(qurey);
       const isExist = bcrypt.compareSync(
@@ -124,8 +134,14 @@ async function run() {
           message: 'Your pin invalid. Please try again',
         });
       }
-      const result = await transactionCollections.insertOne(userInfo);
+      const result = await transactionCollections.insertOne(sendMoneyInfos);
       if (result.insertedId) {
+        if (userInfo.money > 100) {
+          const updateDc = {
+            $inc: { balance: -5 },
+          };
+          const curBalance = await userCollections.updateOne(qurey, updateDc);
+        }
         const updateDc = {
           $inc: { balance: -sendMoney },
         };
@@ -148,6 +164,13 @@ async function run() {
     app.post('/cash-out', async (req, res) => {
       const cashout = req.body;
       const qurey = { email: cashout?.email };
+      const cashoutInfos = {
+        email: cashout.email,
+        numbers: cashout.numbers,
+        money: cashout.money,
+        date: cashout.date,
+        paymentStatus: 'cash-out',
+      };
       const currentUser = await userCollections.findOne(qurey);
       const isExist = bcrypt.compareSync(
         cashout?.password,
@@ -160,9 +183,11 @@ async function run() {
         });
       }
       const cashFree = cashout.money * 0.015;
+
       const money = cashout.money + cashFree;
+
       const numbers = { number: cashout.numbers };
-      const user = await transactionCollections.insertOne(cashout);
+      const user = await transactionCollections.insertOne(cashoutInfos);
 
       if (user.insertedId) {
         const updateDcs = {
@@ -190,11 +215,119 @@ async function run() {
       const qurey = { email: req.query.email };
       const result = await transactionCollections
         .find(qurey)
-        .sort({ date: 1 })
+        .sort({ date: -1 })
         .limit(10)
         .toArray();
       res.send(result);
     });
+
+    app.get('/transactions-management', async (req, res) => {
+      const qurey = { email: req.query.email, status: 'request' };
+      const result = await transactionCollections.find(qurey).toArray();
+      res.send(result);
+    });
+
+    app.patch('/userBalance-update', async (req, res) => {
+      const money = parseFloat(req.body.money);
+      const qurey = { email: req.query.email };
+      const updateDc = {
+        $inc: { balance: +money },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.patch('/agentBalance-update', async (req, res) => {
+      const money = parseFloat(req.body.money);
+      const qurey = { email: req.query.email };
+      const updateDc = {
+        $inc: { balance: -money },
+      };
+
+      const result = await userCollections.findOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.put('/request-mamagement/:id', async (req, res) => {
+      const id = req.params.id;
+      const qurey = { _id: new ObjectId(id) };
+      const updateDc = {
+        $set: { status: 'approve' },
+      };
+
+      const result = await transactionCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.post('/send-payment-history', async (req, res) => {
+      const userInfo = req.body;
+      const result = await transactionCollections.insertOne(userInfo);
+      res.send(result);
+    });
+
+    app.get('/agent-history', async (req, res) => {
+      const qurey = { email: req.query.email };
+      const result = await transactionCollections
+        .find(qurey)
+        .sort({ date: 1 })
+        .limit(20)
+        .toArray();
+      res.send(result);
+    });
+
+    //-----------adim handile data ----------------
+    app.get('/users-management', async (req, res) => {
+      const result = await userCollections.find().toArray();
+      res.send(result);
+    });
+    app.patch('/active-account/:id', async (req, res) => {
+      const id = req.params.id;
+      const qurey = { _id: new ObjectId(id) };
+      const updateDc = {
+        $set: { status: 'actived' },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+    app.patch('/block-account/:id', async (req, res) => {
+      const id = req.params.id;
+      const qurey = { _id: new ObjectId(id) };
+      const updateDc = {
+        $set: { status: 'block' },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.patch('/userBalance-updates/:id', async (req, res) => {
+      const id = req.params.id;
+      const qurey = { _id: new ObjectId(id) };
+      const updateDc = {
+        $inc: { balance: +40 },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+    app.patch('/agentsBalance-updates/:id', async (req, res) => {
+      const id = req.params.id;
+      const qurey = { _id: new ObjectId(id) };
+      const updateDc = {
+        $inc: { balance: +10000 },
+      };
+
+      const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.get('/all-transactions', async (req, res) => {
+      const result = await transactionCollections.find().toArray();
+      res.send(result);
+    });
+
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!'
     );
