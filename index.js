@@ -91,13 +91,14 @@ async function run() {
       const password = req.query.password;
 
       const currentUser = await userCollections.findOne({ email: email });
-      const hxpassword = bcrypt.compareSync(password, currentUser?.password);
-
-      if (!currentUser) {
+      if (!currentUser?.email) {
         return res.send({
           message: 'Your email and password invalid. Please try again',
         });
-      } else if (!hxpassword) {
+      }
+      const hxpassword = bcrypt.compareSync(password, currentUser?.password);
+
+      if (!hxpassword) {
         return res.send({
           message: 'Your email and password invalid. Please try again',
         });
@@ -148,17 +149,6 @@ async function run() {
         const curBalance = await userCollections.updateOne(qurey, updateDc);
       }
       res.send({ user: result });
-    });
-
-    app.patch('/send-free', async (req, res) => {
-      const qurey = { email: req.query.email };
-
-      const updateDc = {
-        $inc: { balance: -5 },
-      };
-
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
     });
 
     app.post('/cash-out', async (req, res) => {
@@ -222,7 +212,8 @@ async function run() {
     });
 
     app.get('/transactions-management', async (req, res) => {
-      const qurey = { email: req.query.email, status: 'request' };
+      const qurey = { numbers: req.query.email, status: 'request' };
+
       const result = await transactionCollections.find(qurey).toArray();
       res.send(result);
     });
@@ -245,17 +236,18 @@ async function run() {
         $inc: { balance: -money },
       };
 
-      const result = await userCollections.findOne(qurey, updateDc);
+      const result = await userCollections.updateOne(qurey, updateDc);
       res.send(result);
     });
 
     app.put('/request-mamagement/:id', async (req, res) => {
       const id = req.params.id;
+
       const qurey = { _id: new ObjectId(id) };
+
       const updateDc = {
         $set: { status: 'approve' },
       };
-
       const result = await transactionCollections.updateOne(qurey, updateDc);
       res.send(result);
     });
@@ -270,7 +262,7 @@ async function run() {
       const qurey = { email: req.query.email };
       const result = await transactionCollections
         .find(qurey)
-        .sort({ date: 1 })
+        .sort({ date: -1 })
         .limit(20)
         .toArray();
       res.send(result);
@@ -320,6 +312,13 @@ async function run() {
       };
 
       const result = await userCollections.updateOne(qurey, updateDc);
+      res.send(result);
+    });
+
+    app.get('/searcNames', async (req, res) => {
+      const qurey = { name: { $regex: req.query.search, $options: 'i' } };
+
+      const result = await userCollections.find(qurey).toArray();
       res.send(result);
     });
 
