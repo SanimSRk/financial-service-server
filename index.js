@@ -77,7 +77,13 @@ async function run() {
         balance: user?.balance,
       };
       const qurey = { email: user?.email };
+      const qureyNumber = { number: user?.number };
+      const isExistNumber = await userCollections.findOne(qureyNumber);
+      if (isExistNumber) {
+        return res.send({ message: 'your email alredy account ' });
+      }
       const isExist = await userCollections.findOne(qurey);
+
       if (!isExist) {
         const result = await userCollections.insertOne(userInfo);
         res.send(result);
