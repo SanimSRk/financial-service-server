@@ -1,14 +1,22 @@
 const express = require('express');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const cors = require('cors');
 require('dotenv').config();
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
-const cors = require('cors');
 const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      'http://localhost:5173',
+      'https://66acf3b943ec4d5e50f6f63b--chic-hamster-ebd90b.netlify.app',
+      'https://financial-service-c1c6c.web.app',
+    ],
+  })
+);
 
 app.get('/', async (req, res) => {
   res.send('financial service server site is run ');
@@ -28,7 +36,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     // Send a ping to confirm a successful connection
     const database = client.db('Financial-Service');
     const userCollections = database.collection('User');
@@ -45,21 +53,49 @@ async function run() {
     });
 
     //verfiy token-------------
-    // const verifyToken = (req, res, next) => {
-    //   if (!req.headers.authorization) {
-    //     return res.status(401).send({ message: 'forbidden acces' });
-    //   }
-    //   const token = req.headers.authorization.split(' ')[1];
-    //   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decode) => {
-    //     if (err) {
-    //       return res.status(401).send({ message: 'forbidden access' });
-    //     }
+    const verifyToken = (req, res, next) => {
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: 'forbidden acces' });
+      }
+      const token = req.headers.authorization.split(' ')[1];
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decode) => {
+        if (err) {
+          return res.status(401).send({ message: 'forbidden acces' });
+        }
+        req.decode = decode;
+        next();
+      });
+    };
+    const verifyUser = async (req, res, next) => {
+      const email = req.decode.email;
 
-    //     req.decode = decode;
+      const qurey = { email: email, role: 'user' };
+      const isUser = await userCollections.findOne(qurey);
+      if (!isUser) {
+        return res.status(401).send({ message: 'forbidden acces' });
+      }
+      next();
+    };
+    const verifyAgent = async (req, res, next) => {
+      const email = req.decode.email;
 
-    //     next();
-    //   });
-    // };
+      const qurey = { email: email, role: 'agent' };
+      const isAgent = await userCollections.findOne(qurey);
+      if (!isAgent) {
+        return res.status(401).send({ message: 'forbidden acces' });
+      }
+      next();
+    };
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decode.email;
+
+      const qurey = { email: email, role: 'admin' };
+      const isAdmin = await userCollections.findOne(qurey);
+      if (!isAdmin) {
+        return res.status(401).send({ message: 'forbidden acces' });
+      }
+      next();
+    };
 
     // await client.db('admin').command({ ping: 1 });
 
@@ -113,13 +149,13 @@ async function run() {
       }
     });
 
-    app.get('/users', async (req, res) => {
+    app.get('/users', verifyToken, async (req, res) => {
       const qurey = { email: req.query.email };
       const result = await userCollections.findOne(qurey);
       res.send(result);
     });
 
-    app.post('/send-money', async (req, res) => {
+    app.post('/send-money', verifyToken, verifyUser, async (req, res) => {
       const userInfo = req.body;
       const sendMoney = userInfo?.money;
       const sendMoneyInfos = {
@@ -130,6 +166,7 @@ async function run() {
         paymentStatus: 'send-money',
       };
       const qurey = { email: userInfo?.email };
+      const NumberQures = { number: userInfo.numbers };
       const currentUser = await userCollections.findOne(qurey);
       const isExist = bcrypt.compareSync(
         userInfo?.password,
@@ -144,20 +181,29 @@ async function run() {
       const result = await transactionCollections.insertOne(sendMoneyInfos);
       if (result.insertedId) {
         if (userInfo.money > 100) {
-          const updateDc = {
+          const updateDcs = {
             $inc: { balance: -5 },
           };
-          const curBalance = await userCollections.updateOne(qurey, updateDc);
+          const curBalance = await userCollections.updateOne(qurey, updateDcs);
         }
         const updateDc = {
           $inc: { balance: -sendMoney },
         };
         const curBalance = await userCollections.updateOne(qurey, updateDc);
+
+        const updatesDcsed = {
+          $inc: { balance: +sendMoney },
+        };
+        const updateRecevUser = await userCollections.updateOne(
+          NumberQures,
+          updatesDcsed
+        );
       }
+
       res.send({ user: result });
     });
 
-    app.post('/cash-out', async (req, res) => {
+    app.post('/cash-out', verifyToken, verifyUser, async (req, res) => {
       const cashout = req.body;
       const qurey = { email: cashout?.email };
       const cashoutInfos = {
@@ -201,70 +247,100 @@ async function run() {
       res.send({ user: user });
     });
 
-    app.post('/amount-request', async (req, res) => {
+    app.post('/amount-request', verifyToken, verifyUser, async (req, res) => {
       const userInfo = req.body;
       const result = await transactionCollections.insertOne(userInfo);
       res.send(result);
     });
 
-    app.get('/transactions-history', async (req, res) => {
-      const qurey = { email: req.query.email };
-      const result = await transactionCollections
-        .find(qurey)
-        .sort({ date: -1 })
-        .limit(10)
-        .toArray();
-      res.send(result);
-    });
+    app.get(
+      '/transactions-history',
+      verifyToken,
+      verifyUser,
+      async (req, res) => {
+        const qurey = { email: req.query.email };
+        const result = await transactionCollections
+          .find(qurey)
+          .sort({ date: -1 })
+          .limit(10)
+          .toArray();
+        res.send(result);
+      }
+    );
 
-    app.get('/transactions-management', async (req, res) => {
-      const qurey = { numbers: req.query.email, status: 'request' };
+    app.get(
+      '/transactions-management',
+      verifyToken,
+      verifyAgent,
+      async (req, res) => {
+        const qurey = { numbers: req.query.email, status: 'request' };
 
-      const result = await transactionCollections.find(qurey).toArray();
-      res.send(result);
-    });
+        const result = await transactionCollections.find(qurey).toArray();
+        res.send(result);
+      }
+    );
 
-    app.patch('/userBalance-update', async (req, res) => {
-      const money = parseFloat(req.body.money);
-      const qurey = { email: req.query.email };
-      const updateDc = {
-        $inc: { balance: +money },
-      };
+    app.patch(
+      '/userBalance-update',
+      verifyToken,
+      verifyAgent,
+      async (req, res) => {
+        const money = parseFloat(req.body.money);
+        const qurey = { email: req.query.email };
+        const updateDc = {
+          $inc: { balance: +money },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
 
-    app.patch('/agentBalance-update', async (req, res) => {
-      const money = parseFloat(req.body.money);
-      const qurey = { email: req.query.email };
-      const updateDc = {
-        $inc: { balance: -money },
-      };
+    app.patch(
+      '/agentBalance-update',
+      verifyToken,
+      verifyAgent,
+      async (req, res) => {
+        const money = parseFloat(req.body.money);
+        const qurey = { email: req.query.email };
+        const updateDc = {
+          $inc: { balance: -money },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
 
-    app.put('/request-mamagement/:id', async (req, res) => {
-      const id = req.params.id;
+    app.put(
+      '/request-mamagement/:id',
+      verifyToken,
+      verifyAgent,
+      async (req, res) => {
+        const id = req.params.id;
 
-      const qurey = { _id: new ObjectId(id) };
+        const qurey = { _id: new ObjectId(id) };
 
-      const updateDc = {
-        $set: { status: 'approve' },
-      };
-      const result = await transactionCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
+        const updateDc = {
+          $set: { status: 'approve' },
+        };
+        const result = await transactionCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
 
-    app.post('/send-payment-history', async (req, res) => {
-      const userInfo = req.body;
-      const result = await transactionCollections.insertOne(userInfo);
-      res.send(result);
-    });
+    app.post(
+      '/send-payment-history',
+      verifyToken,
+      verifyAgent,
+      async (req, res) => {
+        const userInfo = req.body;
+        const result = await transactionCollections.insertOne(userInfo);
+        res.send(result);
+      }
+    );
 
-    app.get('/agent-history', async (req, res) => {
+    app.get('/agent-history', verifyToken, verifyAgent, async (req, res) => {
       const qurey = { email: req.query.email };
       const result = await transactionCollections
         .find(qurey)
@@ -275,60 +351,80 @@ async function run() {
     });
 
     //-----------adim handile data ----------------
-    app.get('/users-management', async (req, res) => {
+    app.get('/users-management', verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollections.find().toArray();
       res.send(result);
     });
-    app.patch('/active-account/:id', async (req, res) => {
-      const id = req.params.id;
-      const qurey = { _id: new ObjectId(id) };
-      const updateDc = {
-        $set: { status: 'actived' },
-      };
+    app.patch(
+      '/active-account/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const qurey = { _id: new ObjectId(id) };
+        const updateDc = {
+          $set: { status: 'actived' },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
-    app.patch('/block-account/:id', async (req, res) => {
-      const id = req.params.id;
-      const qurey = { _id: new ObjectId(id) };
-      const updateDc = {
-        $set: { status: 'block' },
-      };
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
+    app.patch(
+      '/block-account/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const qurey = { _id: new ObjectId(id) };
+        const updateDc = {
+          $set: { status: 'block' },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
 
-    app.patch('/userBalance-updates/:id', async (req, res) => {
-      const id = req.params.id;
-      const qurey = { _id: new ObjectId(id) };
-      const updateDc = {
-        $inc: { balance: +40 },
-      };
+    app.patch(
+      '/userBalance-updates/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const qurey = { _id: new ObjectId(id) };
+        const updateDc = {
+          $inc: { balance: +40 },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
-    app.patch('/agentsBalance-updates/:id', async (req, res) => {
-      const id = req.params.id;
-      const qurey = { _id: new ObjectId(id) };
-      const updateDc = {
-        $inc: { balance: +10000 },
-      };
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
+    app.patch(
+      '/agentsBalance-updates/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const qurey = { _id: new ObjectId(id) };
+        const updateDc = {
+          $inc: { balance: +10000 },
+        };
 
-      const result = await userCollections.updateOne(qurey, updateDc);
-      res.send(result);
-    });
+        const result = await userCollections.updateOne(qurey, updateDc);
+        res.send(result);
+      }
+    );
 
-    app.get('/searcNames', async (req, res) => {
+    app.get('/searcNames', verifyToken, verifyAdmin, async (req, res) => {
       const qurey = { name: { $regex: req.query.search, $options: 'i' } };
 
       const result = await userCollections.find(qurey).toArray();
       res.send(result);
     });
 
-    app.get('/all-transactions', async (req, res) => {
+    app.get('/all-transactions', verifyToken, verifyAdmin, async (req, res) => {
       const result = await transactionCollections.find().toArray();
       res.send(result);
     });
